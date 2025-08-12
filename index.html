@@ -155,21 +155,19 @@
             <div v-if="!isRecording">
               <i class="fa fa-cloud-upload text-4xl text-gray-400 mb-4"></i>
               <p class="text-gray-500 mb-4">拖放音频文件到此处，或</p>
-              
               <div class="flex flex-col sm:flex-row justify-center gap-4">
                 <label class="cursor-pointer bg-primary/10 hover:bg-primary/20 text-primary px-6 py-3 rounded-lg transition-all flex items-center justify-center">
                   <i class="fa fa-file-audio-o mr-2"></i> 选择音频文件
-                  <input type="file" accept="audio/*" @change="handleFileSelect" class="hidden">
+                  <input type="file" accept="audio/*" @change="handleFileSelect" class="hidden" multiple> <!-- 添加multiple属性 -->
                 </label>
-                
-                <button 
+
+                <button
                   @click="startRecording"
                   class="bg-secondary/10 hover:bg-secondary/20 text-secondary px-6 py-3 rounded-lg transition-all flex items-center justify-center"
                 >
                   <i class="fa fa-microphone mr-2"></i> 开始录音
                 </button>
               </div>
-              
               <p class="text-xs text-gray-400 mt-4">支持格式: MP3, WAV, WebM 等音频文件 (最大50MB)</p>
             </div>
             
@@ -193,41 +191,52 @@
           </div>
           
           <!-- 已选择的文件 -->
-          <div v-if="selectedFile" class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-            <div class="flex justify-between items-center">
-              <div class="flex items-center">
-                <i class="fa fa-file-audio-o text-primary mr-3"></i>
-                <div>
-                  <p class="font-medium text-gray-800 truncate max-w-md">{{ selectedFile.name }}</p>
-                  <p class="text-sm text-gray-500">{{ formatFileSize(selectedFile.size) }}</p>
+          <div v-if="selectedFiles.length > 0" class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <p class="font-medium text-gray-700 mb-2">已选择 {{ selectedFiles.length }} 个文件：</p>
+            <div class="space-y-2 max-h-60 overflow-y-auto pr-2">
+              <div v-for="(file, index) in selectedFiles" :key="index" class="flex justify-between items-center p-2 hover:bg-gray-100 rounded">
+                <div class="flex items-center">
+                  <i class="fa fa-file-audio-o text-primary mr-3"></i>
+                  <div class="truncate max-w-md">
+                    <p class="font-medium text-gray-800">{{ file.name }}</p>
+                    <p class="text-sm text-gray-500">{{ formatFileSize(file.size) }}</p>
+                  </div>
                 </div>
+
+                <button
+                  @click="removeFile(index)"
+                  class="text-gray-400 hover:text-danger transition-colors p-1"
+                >
+                  <i class="fa fa-times"></i>
+                </button>
               </div>
-              
-              <button 
-                @click="removeFile"
-                class="text-gray-400 hover:text-danger transition-colors"
+            </div>
+          </div>
+
+          <!-- 上传按钮 -->
+          <div v-if="selectedFiles.length > 0">
+            <div class="flex justify-between items-center mt-4">
+              <button
+                @click="clearAllFiles"
+                class="text-gray-600 hover:text-danger transition-colors text-sm"
               >
-                <i class="fa fa-times"></i>
+                <i class="fa fa-trash-o mr-1"></i> 清除所有文件
+              </button>
+
+              <button
+                @click="uploadFiles"
+                :disabled="isUploading"
+                class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center"
+              >
+                <span v-if="!isUploading">
+                  <i class="fa fa-upload mr-2"></i> 上传 {{ selectedFiles.length }} 个文件
+                </span>
+                <span v-if="isUploading" class="flex items-center">
+                  <i class="fa fa-spinner fa-spin mr-2"></i> 上传中... {{ uploadProgress }}%
+                </span>
               </button>
             </div>
           </div>
-          
-          <!-- 上传按钮 -->
-          <div v-if="selectedFile" class="flex justify-end">
-            <button 
-              @click="uploadFile"
-              :disabled="isUploading"
-              class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center"
-            >
-              <span v-if="!isUploading">
-                <i class="fa fa-upload mr-2"></i> 上传录音
-              </span>
-              <span v-if="isUploading" class="flex items-center">
-                <i class="fa fa-spinner fa-spin mr-2"></i> 上传中... {{ uploadProgress }}%
-              </span>
-            </button>
-          </div>
-        </div>
         
         <!-- 上传结果提示 -->
         <div v-if="uploadSuccess" class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm flex items-center">
@@ -382,13 +391,15 @@
           isLoading: false,
           
           // 录音和上传相关
-          selectedFile: null,
+          selectedFiles: [],
           isRecording: false,
           recordingTime: '00:00',
           recordingTimer: null,
           recordingSeconds: 0,
           mediaRecorder: null,
           audioChunks: [],
+          // 多文件上传相关
+          currentUploadIndex: 0,
           
           // 上传状态
           isUploading: false,
@@ -469,19 +480,34 @@
         
         // 处理文件选择
         handleFileSelect(event) {
-          const file = event.target.files[0];
-          if (file) {
-            this.selectedFile = file;
+          const files = Array.from(event.target.files);
+          if (files.length > 0) {
+            // 过滤非音频文件
+            const audioFiles = files.filter(file => file.type.startsWith('audio/'));
+
+            // 添加到已选文件列表（去重）
+            audioFiles.forEach(file => {
+              if (!this.selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                this.selectedFiles.push(file);
+              }
+            });
+
             this.uploadSuccess = '';
             this.uploadError = '';
-            // 清空文件输入，以便可以选择同一个文件
+
+            // 清空文件输入
             event.target.value = '';
           }
         },
         
         // 移除已选择的文件
-        removeFile() {
-          this.selectedFile = null;
+        removeFile(index) {
+          this.selectedFiles.splice(index, 1);
+        },
+
+        // 清除所有文件
+        clearAllFiles() {
+          this.selectedFiles = [];
           this.uploadSuccess = '';
           this.uploadError = '';
         },
@@ -522,21 +548,20 @@
         
         // 停止录音
         stopRecording() {
-          if (this.mediaRecorder && this.isRecording) {
+           if (this.mediaRecorder && this.isRecording) {
             this.mediaRecorder.stop();
             this.isRecording = false;
             clearInterval(this.recordingTimer);
-            
-            // 当录音数据可用时创建文件
+
             this.mediaRecorder.addEventListener('stop', () => {
               const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
               const file = new File([audioBlob], `recording-${new Date().toISOString().slice(0, 19)}.webm`, {
                 type: 'audio/webm'
               });
-              
-              this.selectedFile = file;
-              
-              // 停止所有音轨
+
+              // 添加到多文件列表
+              this.selectedFiles.push(file);
+
               if (this.mediaRecorder.stream) {
                 this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
               }
@@ -550,43 +575,56 @@
           const seconds = (this.recordingSeconds % 60).toString().padStart(2, '0');
           this.recordingTime = `${minutes}:${seconds}`;
         },
-        
-        // 上传文件
-        async uploadFile() {
-          if (!this.selectedFile) return;
-          
+
+        // 上传多个文件
+        async uploadFiles() {
+          if (this.selectedFiles.length === 0) return;
+
           this.isUploading = true;
           this.uploadProgress = 0;
           this.uploadSuccess = '';
           this.uploadError = '';
-          
-          const formData = new FormData();
-          formData.append('recording', this.selectedFile);
-          
+          this.currentUploadIndex = 0;
+
           try {
-            const response = await axios.post('/api/upload', formData, {
-              headers: {
-                'Content-Type': 'multipart/form-data'
-              },
-              onUploadProgress: progressEvent => {
-                const percentCompleted = Math.round(
-                  (progressEvent.loaded * 100) / progressEvent.total
-                );
-                this.uploadProgress = percentCompleted;
-              }
-            });
-            
-            this.uploadSuccess = `文件 "${response.data.originalname}" 上传成功`;
-            this.selectedFile = null;
-            this.fetchRecordings(); // 上传成功后刷新列表
+            // 逐个上传文件
+            for (let i = 0; i < this.selectedFiles.length; i++) {
+              this.currentUploadIndex = i;
+              await this.uploadSingleFile(this.selectedFiles[i]);
+            }
+
+            this.uploadSuccess = `成功上传 ${this.selectedFiles.length} 个文件`;
+            this.selectedFiles = [];
+            this.fetchRecordings();
           } catch (error) {
             console.error('文件上传失败:', error);
-            this.uploadError = error.response?.data?.message || '文件上传失败，请重试';
+            this.uploadError = error.response?.data?.message ||
+              `上传失败，已成功上传 ${this.currentUploadIndex} 个文件`;
           } finally {
             this.isUploading = false;
           }
         },
         
+        // 上传单个文件（供多文件上传调用）
+        async uploadSingleFile(file) {
+          const formData = new FormData();
+          formData.append('recordings', file);  // 注意字段名与后端保持一致
+
+          return axios.post('/api/upload', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            },
+            onUploadProgress: progressEvent => {
+              // 计算整体进度
+              const fileProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              const overallProgress = Math.round(
+                (this.currentUploadIndex * 100 + fileProgress) / this.selectedFiles.length
+              );
+              this.uploadProgress = overallProgress;
+            }
+          });
+        },
+
         // 获取录音列表
         async fetchRecordings() {
           this.isLoadingRecordings = true;

@@ -6,6 +6,7 @@ const fsSync = require("fs");
 const session = require("express-session");
 
 // 初始化Express应用
+const publicDir = path.join(__dirname, 'public')
 const app = express();
 const PORT = 8001;
 
@@ -18,7 +19,7 @@ if (!fsSync.existsSync(uploadDir)) {
 // 配置中间件
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(publicDir));
 
 // 配置会话管理
 app.use(
@@ -189,6 +190,21 @@ app.get("/api/recordings", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("获取录音列表失败:", err);
     res.status(500).json({ message: "获取录音列表失败" });
+  }
+});
+
+// 处理上传文件的访问请求（需登录）
+app.get('/uploads/:filename', requireAuth, async (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(uploadDir, filename);
+
+  try {
+    // 验证文件是否存在
+    await fs.access(filePath);
+    // 发送文件给客户端
+    res.sendFile(filePath);
+  } catch (err) {
+    res.status(404).json({ message: '文件不存在' });
   }
 });
 
